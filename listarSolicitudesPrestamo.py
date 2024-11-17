@@ -1,6 +1,7 @@
 import boto3
 import json
 from decimal import Decimal
+from boto3.dynamodb.conditions import Key  # Asegúrate de importar Key
 
 # Conexión con DynamoDB
 dynamodb = boto3.resource('dynamodb')
@@ -17,22 +18,31 @@ def decimal_to_serializable(obj):
     return obj
 
 def lambda_handler(event, context):
-
-    data = json.loads(event['body'])
-    cuenta = data['usuario_id']
-    
     try:
+        # Parsear el cuerpo de la solicitud
+        data = json.loads(event['body'])
+        usuario_id = data.get('usuario_id')
 
+        if not usuario_id:
+            return {
+                'statusCode': 400,
+                'body': json.dumps({
+                    'error': 'Solicitud inválida',
+                    'details': 'El campo usuario_id es obligatorio'
+                })
+            }
+
+        # Consulta a DynamoDB para obtener solicitudes por usuario_id
         response = solicitud_table.query(
-            KeyConditionExpression=Key('usuario_id').eq(cuenta)
+            KeyConditionExpression=Key('usuario_id').eq(usuario_id)
         )
-        
-        # Obtener todas las solicitudes
+
+        # Convertir el resultado a un formato JSON serializable
         items = decimal_to_serializable(response.get('Items', []))
 
         return {
             'statusCode': 200,
-            'body': items  # Asegurarse de que sea JSON serializable
+            'body': json.dumps(items)  # Serializar los resultados a JSON
         }
     except Exception as e:
         return {
