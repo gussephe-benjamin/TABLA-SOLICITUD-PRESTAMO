@@ -17,16 +17,22 @@ def decimal_to_serializable(obj):
     return obj
 
 def lambda_handler(event, context):
-    try:
-        # Obtener todas las solicitudes
-        response = solicitud_table.scan()
 
-        # Convertir los datos a un formato serializable
-        solicitudes = decimal_to_serializable(response.get('Items', []))
+    data = json.loads(event['body'])
+    cuenta = data['usuario_id']
+    
+    try:
+
+        response = solicitud_table.query(
+            KeyConditionExpression=Key('usuario_id').eq(cuenta)
+        )
+        
+        # Obtener todas las solicitudes
+        items = decimal_to_serializable(response.get('Items', []))
 
         return {
             'statusCode': 200,
-            'body': json.dumps(solicitudes)  # Asegurarse de que sea JSON serializable
+            'body': items  # Asegurarse de que sea JSON serializable
         }
     except Exception as e:
         return {
