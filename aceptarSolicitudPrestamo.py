@@ -1,58 +1,95 @@
 import boto3
 import json
+from decimal import Decimal
 
+# Conexión a DynamoDB
 dynamodb = boto3.resource('dynamodb')
 solicitud_table = dynamodb.Table('TABLA-SOLICITUD-PRESTAMO')
-prestamo_table = dynamodb.Table('TABLA-PRESTAMOS')
 
+# Función auxiliar para convertir tipos Decimal a JSON serializables
+def decimal_to_serializable(obj):
+    if isinstance(obj, Decimal):
+        return float(obj) if obj % 1 != 0 else int(obj)
+    elif isinstance(obj, list):
+        return [decimal_to_serializable(item) for item in obj]
+    elif isinstance(obj, dict):
+        return {key: decimal_to_serializable(value) for key, value in obj.items()}
+    return obj
+
+# Función Lambda
 def lambda_handler(event, context):
     try:
+        # Validar el cuerpo de la solicitud
+        if 'body' not in event:
+            return {
+                'statusCode': 400,
+                'body': json.dumps({
+                    'error': 'Solicitud inválida',
+                    'details': 'No se encontró el cuerpo de la solicitud'
+                })
+            }
+
+        # Parsear el cuerpo de la solicitud
         data = json.loads(event['body'])
-        usuario_id = data['usuario_id']
-        solicitud_id = data['solicitud_id']
+        
+        usuario_id = data.get('usuario_id')
+        solicitud_id = data.get('solicitud_id')
 
-        # Obtener la solicitud
-        solicitud = solicitud_table.get_item(Key={'usuario_id': usuario_id, 'solicitud_id': solicitud_id}).get('Item')
+        # Validar que usuario_id y solicitud_id estén presentes
+        if not usuario_id or not solicitud_id:
+            return {
+                'statusCode': 400,
+                'body': json.dumps({
+                    'error': 'Solicitud inválida',
+                    'details': 'Los campos usuario_id y solicitud_id son obligatorios'
+                })
+            }
 
+        # Obtener la solicitud desde DynamoDB
+        response = solicitud_table.get_item(Key={'usuario_id': usuario_id, 'solicitud_id': solicitud_id})
+        solicitud = response.get('Item')
+
+        # Validar si la solicitud existe
         if not solicitud:
             return {
                 'statusCode': 404,
                 'body': json.dumps({'error': 'Solicitud no encontrada'})
             }
 
-        if solicitud['estado'] != 'pendiente':
+        # Validar si la solicitud ya fue revisada
+        if solicitud.get('estado') != 'pendiente':
             return {
                 'statusCode': 400,
-                'body': json.dumps({'error': 'La solicitud ya fue revisada'})
+                'body': json.dumps({
+                    'error': 'La solicitud ya fue revisada',
+                    'estado_actual': solicitud.get('estado')
+                })
             }
 
-        # Crear registro en la tabla préstamos
-        prestamo_table.put_item(Item={
-            'usuario_id': usuario_id,
-            'prestamo_id': solicitud_id,
-            'monto': solicitud['monto'],
-            'descripcion': solicitud['descripcion'],
-            'estado': 'activo',
-            'fecha_creacion': solicitud['fecha_creacion']
-        })
-
-        # Actualizar estado en la solicitud
+        # Actualizar el estado de la solicitud a 'rechazado'
         solicitud_table.update_item(
             Key={'usuario_id': usuario_id, 'solicitud_id': solicitud_id},
             UpdateExpression='SET estado = :estado',
-            ExpressionAttributeValues={':estado': 'aprobado'}
+            ExpressionAttributeValues={':estado': 'rechazado'}
         )
 
+        # Retornar respuesta exitosa
         return {
             'statusCode': 200,
-            'body': {'message': 'Solicitud aprobada y préstamo creado'}
+            'body': json.dumps({
+                'message': 'Solicitud rechazada exitosamente',
+                'usuario_id': usuario_id,
+                'solicitud_id': solicitud_id,
+                'nuevo_estado': 'aceptado'
+            })
         }
 
     except Exception as e:
+        # Manejo de errores generales
         return {
             'statusCode': 500,
             'body': json.dumps({
-                'error': 'Error interno al aprobar la solicitud',
+                'error': 'Error interno al rechazar la solicitud',
                 'details': str(e)
             })
         }
